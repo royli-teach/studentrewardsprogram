@@ -136,6 +136,16 @@
   </div>
 </dialog>
 
+<dialog id="renameDlg">
+  <h2 style="margin:0 0 10px;font-size:26px">Rename student</h2>
+  <input type="text" id="renameInput" maxlength="40" autocomplete="off" style="width:100%">
+  <p class="err" id="renameErr"></p>
+  <div class="footer" style="margin-top:8px">
+    <button class="btn" id="renameNo">Cancel</button>
+    <button class="btn primary" id="renameYes">Save name</button>
+  </div>
+</dialog>
+
 <dialog id="confirmDlg">
   <h2 style="margin:0 0 10px;font-size:26px" id="confirmMsg"></h2>
   <div class="footer" style="margin-top:14px">
@@ -284,7 +294,9 @@
         });
       });
       del.style.fontSize = "15px";
-      [span("nm", s.name),
+      var ren = mk("Rename", "Rename " + s.name, "", function () { openRename(s.id); });
+      ren.style.fontSize = "15px";
+      [span("nm", s.name), ren,
        mk("▲", "Move " + s.name + " up", "", function () { move(-1); }, i === 0),
        mk("▼", "Move " + s.name + " down", "", function () { move(1); }, i === state.students.length - 1),
        del].forEach(function (el) { top.appendChild(el); });
@@ -317,6 +329,22 @@
     state.pin = v; save(); $("newPin").value = ""; $("adminMsg").style.color = "var(--good)"; $("adminMsg").textContent = "PIN changed.";
     setTimeout(function () { $("adminMsg").style.color = ""; }, 100);
   });
+  var renameId = null;
+  function openRename(id) {
+    var s = find(id); if (!s) return;
+    renameId = id; $("renameInput").value = s.name; $("renameErr").textContent = "";
+    $("renameDlg").showModal(); $("renameInput").focus(); $("renameInput").select();
+  }
+  function saveRename() {
+    var v = $("renameInput").value.trim(), s = find(renameId);
+    if (!v) { $("renameErr").textContent = "Enter a name to save."; return; }
+    if (s) { s.name = v; save(); render(); renderAdmin(); }
+    renameId = null; $("renameDlg").close();
+  }
+  $("renameYes").addEventListener("click", saveRename);
+  $("renameNo").addEventListener("click", function () { renameId = null; $("renameDlg").close(); });
+  $("renameInput").addEventListener("keydown", function (e) { if (e.key === "Enter") saveRename(); });
+
   var confirmCb = null;
   function ask(msg, cb) { $("confirmMsg").textContent = msg; confirmCb = cb; $("confirmDlg").showModal(); }
   $("confirmNo").addEventListener("click", function () { confirmCb = null; $("confirmDlg").close(); });
