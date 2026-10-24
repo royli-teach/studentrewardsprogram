@@ -50,6 +50,13 @@
   .row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   .row .nm { flex: 1; font-weight: 700; font-size: 19px; min-width: 120px; overflow-wrap: anywhere; }
   .row .ct { min-width: 64px; text-align: center; font-weight: 700; font-size: 18px; }
+  .row.two { display: block; }
+  .rowtop, .rowctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .rowctl { margin-top: 8px; gap: 8px 22px; }
+  .grp { display: flex; align-items: center; gap: 6px; }
+  .grp .lbl { color: var(--muted); font-weight: 700; font-size: 16px; }
+  .btn:disabled { opacity: .35; cursor: default; }
+  .btn:disabled:hover { background: #fff; color: var(--ink); }
   .add { display: flex; gap: 8px; flex-wrap: wrap; }
   input[type=text], input[type=password], input[type=number], textarea { font-family: inherit; font-size: 18px; padding: 8px 12px; border: 2px solid var(--ink); border-radius: 10px; background: #fff; color: var(--ink); }
   .add input, .add textarea { flex: 1; min-width: 160px; }
@@ -121,7 +128,10 @@
   <p class="err" id="adminMsg"></p>
 
   <div class="footer">
-    <button class="btn danger" id="resetAll">Reset all tallies</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn danger" id="resetAll">Reset all tallies</button>
+      <button class="btn danger" id="resetTrophies">Reset all trophies</button>
+    </div>
     <button class="btn primary" id="closeAdmin">Done</button>
   </div>
 </dialog>
@@ -250,22 +260,54 @@
     $("limInput").value = state.limit;
     var list = $("adminList"); list.innerHTML = "";
     if (!state.students.length) { var p = document.createElement("p"); p.className = "hint"; p.textContent = "No students yet. Add names above."; list.appendChild(p); }
-    state.students.forEach(function (s) {
-      var row = document.createElement("div"); row.className = "row";
-      var nm = document.createElement("span"); nm.className = "nm"; nm.textContent = s.name + (s.rewards ? "  🏆" + s.rewards : "");
-      var minus = document.createElement("button"); minus.className = "btn sm"; minus.textContent = "−"; minus.setAttribute("aria-label", "Remove a tally from " + s.name);
-      var ct = document.createElement("span"); ct.className = "ct"; ct.textContent = s.count + " / " + state.limit;
-      var plus = document.createElement("button"); plus.className = "btn sm"; plus.textContent = "+"; plus.setAttribute("aria-label", "Add a tally to " + s.name);
-      var del = document.createElement("button"); del.className = "btn sm danger"; del.textContent = "Remove"; del.style.fontSize = "15px";
-      minus.addEventListener("click", function () { adminAdjust(s.id, -1); });
-      plus.addEventListener("click", function () { adminAdjust(s.id, 1); });
-      del.addEventListener("click", function () {
+    state.students.forEach(function (s, i) {
+      function mk(txt, label, cls, fn, disabled) {
+        var b = document.createElement("button"); b.className = "btn sm" + (cls ? " " + cls : "");
+        b.textContent = txt; b.setAttribute("aria-label", label); b.disabled = !!disabled;
+        b.addEventListener("click", fn); return b;
+      }
+      function span(cls, txt) { var e = document.createElement("span"); e.className = cls; e.textContent = txt; return e; }
+      function grp(parts) { var g = document.createElement("div"); g.className = "grp"; parts.forEach(function (p) { g.appendChild(p); }); return g; }
+      function trophy(delta) { s.rewards = Math.max(0, (s.rewards || 0) + delta); save(); render(); renderAdmin(); }
+      function move(dir) {
+        var j = i + dir; if (j < 0 || j >= state.students.length) return;
+        var t = state.students[i]; state.students[i] = state.students[j]; state.students[j] = t;
+        save(); render(); renderAdmin();
+      }
+
+      var row = document.createElement("div"); row.className = "row two";
+      var top = document.createElement("div"); top.className = "rowtop";
+      var del = mk("Remove", "Remove " + s.name, "danger", function () {
         ask("Remove " + s.name + " and their tallies?", function () {
           state.students = state.students.filter(function (x) { return x.id !== s.id; });
           save(); render(); renderAdmin();
         });
       });
-      [nm, minus, ct, plus, del].forEach(function (el) { row.appendChild(el); });
+      del.style.fontSize = "15px";
+      [span("nm", s.name),
+       mk("▲", "Move " + s.name + " up", "", function () { move(-1); }, i === 0),
+       mk("▼", "Move " + s.name + " down", "", function () { move(1); }, i === state.students.length - 1),
+       del].forEach(function (el) { top.appendChild(el); });
+
+      var ctl = document.createElement("div"); ctl.className = "rowctl";
+      ctl.appendChild(grp([
+        span("lbl", "Tally"),
+        mk("−", "Remove a tally from " + s.name, "", function () { adminAdjust(s.id, -1); }),
+        span("ct", s.count + " / " + state.limit),
+        mk("+", "Add a tally to " + s.name, "", function () { adminAdjust(s.id, 1); })
+      ]));
+      var reset = mk("Reset", "Reset trophies for " + s.name, "", function () {
+        s.rewards = 0; save(); render(); renderAdmin();
+      }, !s.rewards);
+      reset.style.fontSize = "15px";
+      ctl.appendChild(grp([
+        span("lbl", "🏆 Trophies"),
+        mk("−", "Remove a trophy from " + s.name, "", function () { trophy(-1); }, !s.rewards),
+        span("ct", String(s.rewards || 0)),
+        mk("+", "Add a trophy to " + s.name, "", function () { trophy(1); }),
+        reset
+      ]));
+      row.appendChild(top); row.appendChild(ctl);
       list.appendChild(row);
     });
   }
@@ -280,6 +322,11 @@
   $("confirmNo").addEventListener("click", function () { confirmCb = null; $("confirmDlg").close(); });
   $("confirmYes").addEventListener("click", function () {
     var cb = confirmCb; confirmCb = null; $("confirmDlg").close(); if (cb) cb();
+  });
+  $("resetTrophies").addEventListener("click", function () {
+    ask("Set every student's trophy count back to 0?", function () {
+      state.students.forEach(function (s) { s.rewards = 0; }); save(); render(); renderAdmin();
+    });
   });
   $("resetAll").addEventListener("click", function () {
     ask("Set every student's tally back to 0?", function () {
