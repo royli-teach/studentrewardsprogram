@@ -72,6 +72,24 @@
   #toast { position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 140%); background: var(--ink); color: #fff; padding: 12px 18px; border-radius: 14px; display: flex; gap: 14px; align-items: center; font-size: 18px; font-weight: 700; transition: transform .2s; z-index: 5; }
   #toast.show { transform: translate(-50%, 0); }
   #toast button { background: none; border: 2px solid #fff; color: #fff; border-radius: 8px; padding: 2px 12px; font-size: 16px; font-weight: 700; }
+  .report { font-family: Arial, Helvetica, sans-serif; color: #000; }
+  .report h1 { font-size: 26px; margin: 0 0 4px; }
+  .report p { margin: 2px 0; font-size: 14px; }
+  .report table { border-collapse: collapse; width: 100%; margin-top: 16px; font-size: 15px; }
+  .report th, .report td { border: 1px solid #888; padding: 7px 10px; text-align: left; }
+  .report th { background: #eee; }
+  #reportBox { max-height: 55vh; overflow: auto; border: 2px solid var(--line); border-radius: 12px; padding: 14px; margin: 10px 0; }
+  #printArea { display: none; }
+  @media print {
+    body { background: #fff; padding: 0; }
+    body > *:not(#printArea) { display: none !important; }
+    #printArea { display: block; font-family: Arial, Helvetica, sans-serif; color: #000; }
+    #printArea h1 { font-size: 26px; margin: 0 0 4px; }
+    #printArea p { margin: 2px 0; font-size: 14px; }
+    #printArea table { border-collapse: collapse; width: 100%; margin-top: 16px; font-size: 15px; }
+    #printArea th, #printArea td { border: 1px solid #888; padding: 7px 10px; text-align: left; }
+    #printArea th { background: #eee; }
+  }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -124,6 +142,16 @@
   <h3>Students</h3>
   <div id="adminList"></div>
 
+  <h3>Backup &amp; reports</h3>
+  <div class="add">
+    <button class="btn" id="exportBtn">Export backup</button>
+    <button class="btn" id="importBtn">Import backup</button>
+    <button class="btn" id="printBtn">Print / Save as PDF</button>
+    <input type="file" id="importFile" accept=".json,application/json" hidden>
+  </div>
+  <p class="hint">Backups are .json files and don't include the PIN. For a PDF, choose “Save as PDF” in the print window.</p>
+  <p class="err" id="dataMsg"></p>
+
   <h3>Settings</h3>
   <label class="chk"><input type="checkbox" id="dailyChk"> Students can tap only once per day</label>
   <p class="hint" style="margin-bottom:12px">The limit resets at midnight. Your + and − buttons here are never limited.</p>
@@ -139,6 +167,21 @@
       <button class="btn danger" id="resetTrophies">Reset all trophies</button>
     </div>
     <button class="btn primary" id="closeAdmin">Done</button>
+  </div>
+</dialog>
+
+<div id="printArea"></div>
+
+<dialog id="reportDlg" style="max-width:min(760px,96vw)">
+  <h2 style="margin:0;font-size:26px">Report preview</h2>
+  <div id="reportBox" class="report"></div>
+  <p class="hint">If the print window doesn't open, click Download report, open that file, and press Ctrl+P (Cmd+P on a Mac).</p>
+  <div class="footer">
+    <button class="btn" id="reportClose">Close</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" id="reportDl">Download report</button>
+      <button class="btn primary" id="reportPrint">Print / Save as PDF</button>
+    </div>
   </div>
 </dialog>
 
@@ -388,6 +431,82 @@
 
   $("dailyChk").addEventListener("change", function () {
     state.dailyLimit = $("dailyChk").checked; save(); render(); renderAdmin();
+  });
+
+  /* Backup & reports */
+  function setMsg(text, ok) {
+    var m = $("dataMsg"); m.textContent = text; m.style.color = ok ? "var(--good)" : "";
+  }
+  $("exportBtn").addEventListener("click", function () {
+    var data = { app: "daily-checkin", version: 1, exportedAt: new Date().toISOString(),
+      limit: state.limit, dailyLimit: state.dailyLimit, students: state.students };
+    var blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    var url = URL.createObjectURL(blob), a = document.createElement("a");
+    a.href = url; a.download = "checkin-backup-" + today() + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    setMsg("Backup downloaded.", true);
+  });
+  $("importBtn").addEventListener("click", function () { $("importFile").value = ""; $("importFile").click(); });
+  $("importFile").addEventListener("change", function () {
+    var f = this.files[0]; if (!f) return;
+    var r = new FileReader();
+    r.onload = function () {
+      var d;
+      try { d = JSON.parse(r.result); } catch (e) { setMsg("That file is not a valid backup.", false); return; }
+      if (!d || !Array.isArray(d.students)) { setMsg("That file is not a valid backup.", false); return; }
+      var lim = Math.max(1, Math.min(30, parseInt(d.limit, 10) || state.limit));
+      var list = d.students.filter(function (x) { return x && typeof x.name === "string" && x.name.trim(); })
+        .map(function (x, i) {
+          return {
+            id: typeof x.id === "string" && x.id ? x.id : Date.now().toString(36) + i,
+            name: x.name.trim().slice(0, 40),
+            count: Math.min(lim - 1, Math.max(0, parseInt(x.count, 10) || 0)),
+            rewards: Math.max(0, parseInt(x.rewards, 10) || 0),
+            lastDate: typeof x.lastDate === "string" ? x.lastDate : null
+          };
+        });
+      ask("Replace all current students and settings with this backup (" + list.length + " students)?", function () {
+        state.students = list; state.limit = lim; state.dailyLimit = d.dailyLimit !== false;
+        save(); render(); renderAdmin(); setMsg("Backup restored.", true);
+      });
+    };
+    r.onerror = function () { setMsg("Could not read that file.", false); };
+    r.readAsText(f);
+  });
+  function buildReport(target) {
+    target.innerHTML = "";
+    function el(tag, txt, parent) { var e = document.createElement(tag); if (txt != null) e.textContent = txt; (parent || target).appendChild(e); return e; }
+    el("h1", "Daily Check-In Report");
+    el("p", "Created " + new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }));
+    el("p", "Tallies needed for a reward: " + state.limit + " | One tap per day: " + (state.dailyLimit ? "On" : "Off"));
+    var t = el("table"), hr = el("tr", null, el("thead", null, t));
+    ["Student", "Tally", "Trophies", "Last check-in"].forEach(function (x) { el("th", x, hr); });
+    var tb = el("tbody", null, t);
+    state.students.forEach(function (s) {
+      var tr = el("tr", null, tb);
+      el("td", s.name, tr); el("td", s.count + " / " + state.limit, tr);
+      el("td", String(s.rewards || 0), tr); el("td", s.lastDate || "\u2014", tr);
+    });
+    if (!state.students.length) { var tr2 = el("tr", null, tb); var td = el("td", "No students yet.", tr2); td.colSpan = 4; }
+  }
+  $("printBtn").addEventListener("click", function () {
+    buildReport($("reportBox")); buildReport($("printArea"));
+    $("reportDlg").showModal();
+  });
+  $("reportClose").addEventListener("click", function () { $("reportDlg").close(); });
+  $("reportPrint").addEventListener("click", function () {
+    buildReport($("printArea"));
+    try { window.print(); } catch (e) {}
+  });
+  $("reportDl").addEventListener("click", function () {
+    var css = "body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:30px}h1{font-size:26px;margin:0 0 4px}p{margin:2px 0;font-size:14px}table{border-collapse:collapse;width:100%;margin-top:16px;font-size:15px}th,td{border:1px solid #888;padding:7px 10px;text-align:left}th{background:#eee}";
+    var html = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Daily Check-In Report</title><style>" + css + "</style></head><body>" + $("reportBox").innerHTML + "</body></html>";
+    var blob = new Blob([html], { type: "text/html" });
+    var url = URL.createObjectURL(blob), a = document.createElement("a");
+    a.href = url; a.download = "checkin-report-" + today() + ".html";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   });
 
   var shownDay = today();
